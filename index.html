@@ -1118,6 +1118,7 @@ function exportDailyPDF(entryId){
   const net = entryNet(e);
   const dir = I18N[state.lang].dir;
   const target = getPrintTarget();
+  const hasItems = e.expenses && e.expenses.length>0;
   target.innerHTML = `
     <div dir="${dir}" style="padding:24px;font-family:Cairo,sans-serif;color:#2A1D12;max-width:720px;margin:0 auto;">
       <div style="display:flex;align-items:center;gap:12px;border-bottom:3px solid #B5702A;padding-bottom:14px;margin-bottom:18px;">
@@ -1141,36 +1142,70 @@ function exportDailyPDF(entryId){
           <div style="font-size:.75rem;color:#7C6A57;margin-bottom:4px;">${t('net_after_items')}</div>
           <div style="font-size:1.15rem;font-weight:800;color:${net<0?'#B5432F':'#3E8A55'};">${fmtMoney(net)}</div>
         </div>
+        <div style="flex:1;min-width:150px;background:#F3EBDD;border-radius:10px;padding:12px 14px;">
+          <div style="font-size:.75rem;color:#7C6A57;margin-bottom:4px;">${t('expense_pct_label')}</div>
+          <div style="font-size:1.15rem;font-weight:800;">${e.income>0? (exp/e.income*100).toFixed(1):'0'}%</div>
+        </div>
       </div>
 
-      <h3 style="font-size:1rem;margin-bottom:10px;">${t('items_bought')}</h3>
-      ${(e.expenses&&e.expenses.length)? `
-      <table style="border-collapse:collapse;width:100%;font-size:.85rem;">
-        <thead>
-          <tr style="background:#B5702A;color:#fff;">
-            <th style="padding:8px 10px;text-align:${dir==='rtl'?'right':'left'};">${t('item')}</th>
-            <th style="padding:8px 10px;text-align:${dir==='rtl'?'right':'left'};">${t('qty')}</th>
-            <th style="padding:8px 10px;text-align:${dir==='rtl'?'right':'left'};">${t('amount')}</th>
-          </tr>
-        </thead>
-        <tbody>${e.expenses.map((l,i)=>`<tr style="background:${i%2? '#FBF7F0':'#fff'};">
-            <td style="padding:8px 10px;border-bottom:1px solid #E4D8C4;">${escapeHtml(l.name)}</td>
-            <td style="padding:8px 10px;border-bottom:1px solid #E4D8C4;">${l.qty} ${t(l.unit||'unit_pcs')}</td>
-            <td style="padding:8px 10px;border-bottom:1px solid #E4D8C4;font-weight:700;">${fmtMoney(l.amount)}</td>
-          </tr>`).join('')}</tbody>
-      </table>` : `<p style="color:#7C6A57;">${t('no_items_today')}</p>`}
+      ${hasItems? `
+      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:16px;">
+        <div style="flex:1;min-width:260px;">
+          <h3 style="font-size:1rem;margin-bottom:10px;">${t('items_bought')}</h3>
+          <table style="border-collapse:collapse;width:100%;font-size:.85rem;">
+            <thead>
+              <tr style="background:#B5702A;color:#fff;">
+                <th style="padding:8px 10px;text-align:${dir==='rtl'?'right':'left'};">${t('item')}</th>
+                <th style="padding:8px 10px;text-align:${dir==='rtl'?'right':'left'};">${t('qty')}</th>
+                <th style="padding:8px 10px;text-align:${dir==='rtl'?'right':'left'};">${t('amount')}</th>
+              </tr>
+            </thead>
+            <tbody>${e.expenses.map((l,i)=>`<tr style="background:${i%2? '#FBF7F0':'#fff'};">
+                <td style="padding:8px 10px;border-bottom:1px solid #E4D8C4;">${escapeHtml(l.name)}</td>
+                <td style="padding:8px 10px;border-bottom:1px solid #E4D8C4;">${l.qty} ${t(l.unit||'unit_pcs')}</td>
+                <td style="padding:8px 10px;border-bottom:1px solid #E4D8C4;font-weight:700;">${fmtMoney(l.amount)}</td>
+              </tr>`).join('')}</tbody>
+          </table>
+        </div>
+        <div style="width:220px;">
+          <h3 style="font-size:1rem;margin-bottom:10px;">${t('expense_breakdown')}</h3>
+          <canvas id="print-chart-pie" width="220" height="220"></canvas>
+        </div>
+      </div>` : `<p style="color:#7C6A57;">${t('no_items_today')}</p>`}
       ${e.note? `<p style="margin-top:16px;padding:10px 14px;background:#F3EBDD;border-radius:8px;"><b>${t('note')}:</b> ${escapeHtml(e.note)}</p>`:''}
       <p style="margin-top:24px;color:#B0A28F;font-size:.72rem;text-align:center;">getrank — ${t('generated_on')} ${fmtDate(todayStr())}</p>
     </div>`;
-  window.print();
+
+  const doPrint = ()=>{
+    if(hasItems && typeof Chart!=='undefined'){
+      const byItem = {};
+      e.expenses.forEach(l=>{ byItem[l.name]=(byItem[l.name]||0)+l.amount; });
+      const entries2 = Object.entries(byItem);
+      const ctx = document.getElementById('print-chart-pie');
+      if(ctx){
+        new Chart(ctx, {
+          type:'doughnut',
+          data:{ labels: entries2.map(x=>x[0]), datasets:[{ data: entries2.map(x=>x[1]), backgroundColor:['#B5702A','#5E7847','#3E6C8E','#B5432F','#C9A24A','#8FA06E'] }] },
+          options:{ responsive:false, animation:false, plugins:{legend:{position:'bottom', labels:{font:{size:9}}}} }
+        });
+      }
+    }
+    setTimeout(()=>window.print(), hasItems? 150:0);
+  };
+  if(hasItems && typeof Chart==='undefined'){ chartJsPromise.then(doPrint); } else { doPrint(); }
 }
 function exportPDF(){
   const rows = sortedEntries();
   const totalIncome = rows.reduce((s,e)=>s+(e.income||0),0);
   const totalExp = rows.reduce((s,e)=>s+entryExpenseTotal(e),0);
   const netAll = totalIncome-totalExp;
+  const margin = totalIncome>0? (netAll/totalIncome*100) : 0;
+  const avgDaily = rows.length? netAll/rows.length : 0;
+  let best=null, worst=null;
+  rows.forEach(e=>{ const n=entryNet(e); if(!best||n>entryNet(best)) best=e; if(!worst||n<entryNet(worst)) worst=e; });
   const dir = I18N[state.lang].dir;
   const target = getPrintTarget();
+  const chronological = [...rows].reverse();
   target.innerHTML = `
     <div dir="${dir}" style="padding:24px;font-family:Cairo,sans-serif;color:#2A1D12;max-width:820px;margin:0 auto;">
       <div style="display:flex;align-items:center;gap:12px;border-bottom:3px solid #B5702A;padding-bottom:14px;margin-bottom:18px;">
@@ -1180,7 +1215,7 @@ function exportPDF(){
           <div style="color:#7C6A57;font-size:.85rem;">${t('monthly_report')} — ${t('generated_on')} ${fmtDate(todayStr())}</div>
         </div>
       </div>
-      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
+      <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
         <div style="flex:1;min-width:140px;background:#F3EBDD;border-radius:10px;padding:12px 14px;">
           <div style="font-size:.72rem;color:#7C6A57;margin-bottom:4px;">${t('total_income_period')}</div>
           <div style="font-size:1.1rem;font-weight:800;">${fmtMoney(totalIncome)}</div>
@@ -1198,6 +1233,28 @@ function exportPDF(){
           <div style="font-size:1.1rem;font-weight:800;">${rows.length}</div>
         </div>
       </div>
+      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:140px;background:#F3EBDD;border-radius:10px;padding:12px 14px;">
+          <div style="font-size:.72rem;color:#7C6A57;margin-bottom:4px;">${t('profit_margin')}</div>
+          <div style="font-size:1.05rem;font-weight:800;">${margin.toFixed(1)}%</div>
+        </div>
+        <div style="flex:1;min-width:140px;background:#F3EBDD;border-radius:10px;padding:12px 14px;">
+          <div style="font-size:.72rem;color:#7C6A57;margin-bottom:4px;">${t('avg_daily')}</div>
+          <div style="font-size:1.05rem;font-weight:800;">${fmtMoney(avgDaily)}</div>
+        </div>
+        <div style="flex:1;min-width:140px;background:#F3EBDD;border-radius:10px;padding:12px 14px;">
+          <div style="font-size:.72rem;color:#7C6A57;margin-bottom:4px;">${t('best_day')}</div>
+          <div style="font-size:.95rem;font-weight:800;">${best? fmtDate(best.date)+' — '+fmtMoney(entryNet(best)) : t('none')}</div>
+        </div>
+        <div style="flex:1;min-width:140px;background:#F3EBDD;border-radius:10px;padding:12px 14px;">
+          <div style="font-size:.72rem;color:#7C6A57;margin-bottom:4px;">${t('worst_day')}</div>
+          <div style="font-size:.95rem;font-weight:800;">${worst? fmtDate(worst.date)+' — '+fmtMoney(entryNet(worst)) : t('none')}</div>
+        </div>
+      </div>
+
+      ${rows.length? `<h3 style="font-size:1rem;margin-bottom:10px;">${t('net_over_time')}</h3>
+      <div style="margin-bottom:20px;"><canvas id="print-chart-net" width="760" height="220"></canvas></div>` : ''}
+
       <table style="border-collapse:collapse;width:100%;font-size:.85rem;">
         <thead>
           <tr style="background:#B5702A;color:#fff;">
@@ -1218,7 +1275,21 @@ function exportPDF(){
       </table>
       <p style="margin-top:20px;color:#B0A28F;font-size:.72rem;text-align:center;">getrank</p>
     </div>`;
-  window.print();
+
+  const doPrint = ()=>{
+    if(rows.length && typeof Chart!=='undefined'){
+      const ctx = document.getElementById('print-chart-net');
+      if(ctx){
+        new Chart(ctx, {
+          type:'line',
+          data:{ labels: chronological.map(e=>fmtDate(e.date)), datasets:[{ label:t('net_over_time'), data: chronological.map(e=>entryNet(e)), borderColor:'#B5702A', backgroundColor:'transparent', tension:.3, pointRadius:2 }] },
+          options:{ responsive:false, animation:false, plugins:{legend:{display:false}}, scales:{ x:{ticks:{font:{size:9}}}, y:{ticks:{font:{size:9}}} } }
+        });
+      }
+    }
+    setTimeout(()=>window.print(), rows.length? 150:0);
+  };
+  if(rows.length && typeof Chart==='undefined'){ chartJsPromise.then(doPrint); } else { doPrint(); }
 }
 
 /* ---------------- Catalog ---------------- */
